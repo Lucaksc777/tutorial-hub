@@ -1,0 +1,185 @@
+{
+    "name": "TutorialHub Automation - Google Drive to Portal",
+    "nodes": [
+        {
+            "parameters": {
+                "pollTimes": {
+                    "item": [
+                        {
+                            "mode": "everyMinute"
+                        }
+                    ]
+                },
+                "resource": "folder",
+                "folderId": "YOUR_FOLDER_ID_HERE",
+                "event": "fileCreated",
+                "options": {}
+            },
+            "id": "gd-trigger",
+            "name": "Google Drive Trigger",
+            "type": "n8n-nodes-base.googleDriveTrigger",
+            "typeVersion": 1,
+            "position": [
+                450,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "resource": "file",
+                "operation": "update",
+                "fileId": "={{$node[\"Google Drive Trigger\"].json[\"id\"]}}",
+                "updateFilesFields": {
+                    "item": [
+                        {
+                            "field": "role",
+                            "value": "reader"
+                        },
+                        {
+                            "field": "type",
+                            "value": "anyone"
+                        }
+                    ]
+                }
+            },
+            "id": "gd-permission",
+            "name": "Set Public Permission",
+            "type": "n8n-nodes-base.googleDrive",
+            "typeVersion": 2,
+            "position": [
+                650,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const fileId = items[0].json.id;\nitems[0].json.link_iframe = `https://drive.google.com/file/d/${fileId}/preview`;\nreturn items;"
+            },
+            "id": "code-link",
+            "name": "Format Iframe Link",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 1,
+            "position": [
+                850,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "model": "whisper-1",
+                "file": "={{$node[\"Google Drive Trigger\"].binary.data}}",
+                "options": {}
+            },
+            "id": "openai-whisper",
+            "name": "OpenAI Whisper (Transcription)",
+            "type": "n8n-nodes-base.openAi",
+            "typeVersion": 1,
+            "position": [
+                1050,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "model": "gpt-4",
+                "messages": {
+                    "message": [
+                        {
+                            "role": "system",
+                            "content": "Você é um assistente que analisa transcrições de vídeos de tutoriais. Sua tarefa é extrair: 1. Um título atraente. 2. Um resumo de 2 a 3 frases. 3. Três a cinco tags relevantes (ex: n8n, automação, tutorial). Formate tudo em JSON."
+                        },
+                        {
+                            "content": "={{$node[\"OpenAI Whisper (Transcription)\"].json[\"text\"]}}"
+                        }
+                    ]
+                },
+                "options": {
+                    "responseFormat": "json_object"
+                }
+            },
+            "id": "openai-gpt",
+            "name": "OpenAI GPT (Summary & Tags)",
+            "type": "n8n-nodes-base.openAi",
+            "typeVersion": 1,
+            "position": [
+                1250,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "http://localhost:3000/api/webhook/video",
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={\n  \"titulo\": \"{{$node[\\\"OpenAI GPT (Summary & Tags)\\\"].json[\\\"titulo\\\"]}}\",\n  \"resumo_ia\": \"{{$node[\\\"OpenAI GPT (Summary & Tags)\\\"].json[\\\"resumo\\\"]}}\",\n  \"link_iframe\": \"{{$node[\\\"Format Iframe Link\\\"].json[\\\"link_iframe\\\"]}}\",\n  \"tags\": {{$node[\\\"OpenAI GPT (Summary & Tags)\\\"].json[\\\"tags\\\"]}},\n  \"duracao\": \"10:00\",\n  \"drive_id\": \"{{$node[\\\"Google Drive Trigger\\\"].json[\\\"id\\\"]}}\"\n}",
+                "options": {}
+            },
+            "id": "http-request",
+            "name": "Send to TutorialHub",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1,
+            "position": [
+                1450,
+                300
+            ]
+        }
+    ],
+    "connections": {
+        "gd-trigger": {
+            "main": [
+                [
+                    {
+                        "node": "gd-permission",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "gd-permission": {
+            "main": [
+                [
+                    {
+                        "node": "code-link",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "code-link": {
+            "main": [
+                [
+                    {
+                        "node": "openai-whisper",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "openai-whisper": {
+            "main": [
+                [
+                    {
+                        "node": "openai-gpt",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "openai-gpt": {
+            "main": [
+                [
+                    {
+                        "node": "http-request",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    }
+}
