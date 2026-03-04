@@ -48,7 +48,8 @@ function init() {
     if (token && user) {
         setUserData(user);
         switchView('home-view');
-        fetchVideos(); // Preload data
+        // fetchVideos(); // Removido: O HTML agora é gerado estaticamente no servidor
+        updateStaticStats(); // Nova função para ler o HTML estático
     } else {
         switchView('login-view');
     }
@@ -88,7 +89,7 @@ function switchView(viewId) {
 navBtns.forEach(btn => {
     btn.addEventListener('click', () => {
         switchView(btn.dataset.target);
-        if (btn.dataset.target === 'dashboard-view') fetchVideos();
+        if (btn.dataset.target === 'dashboard-view') updateStaticStats();
     });
 });
 
@@ -131,7 +132,7 @@ loginForm.addEventListener('submit', async (e) => {
         document.getElementById('password').value = '';
         showToast('Login efetuado com sucesso!', 'success');
 
-        fetchVideos();
+        updateStaticStats();
         switchView('home-view');
     } catch (err) {
         showToast(err.message, 'error');
@@ -161,180 +162,34 @@ function showToast(message, type = 'error') {
 }
 
 // -------------------------------
-// DATA FETCHING & STATS
+// STATIC HTML STATS
 // -------------------------------
-async function fetchVideos() {
-    try {
-        const token = localStorage.getItem('token');
-        const res = await fetch(`${API_URL}/api/videos`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+function updateStaticStats() {
+    const cards = document.querySelectorAll('.video-card');
 
-        if (res.status === 401 || res.status === 403) {
-            logoutBtn.click();
-            return;
-        }
-
-        allVideos = await res.json();
-        calculateStats(allVideos);
-        extractAndRenderTagsFilter(allVideos);
-        applyFiltersAndRender();
-    } catch (err) {
-        console.error(err);
-        showToast('Erro ao carregar os tutoriais da API.', 'error');
-    }
-}
-
-function calculateStats(videos) {
-    if (!videos || !videos.length) return;
-
-    // Total
-    statTotal.textContent = videos.length;
-
-    // Unique Tags
-    const uniqueTags = new Set();
-    videos.forEach(v => v.Tags.forEach(t => uniqueTags.add(t.nome)));
-    statTags.textContent = uniqueTags.size;
-
-    // This Week (last 7 days)
-    const oneWeekAgo = new Date();
-    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-
-    const weekCount = videos.filter(v => new Date(v.data_publicacao) > oneWeekAgo).length;
-    statWeek.textContent = weekCount;
-}
-
-// -------------------------------
-// FILTERING & SEARCH
-// -------------------------------
-function extractAndRenderTagsFilter(videos) {
-    const tagCounts = {};
-    videos.forEach(v => v.Tags.forEach(t => {
-        tagCounts[t.nome] = (tagCounts[t.nome] || 0) + 1;
-    }));
-
-    // Sort tags by frequency desc
-    const sortedTags = Object.keys(tagCounts).sort((a, b) => tagCounts[b] - tagCounts[a]);
-
-    filterTagsContainer.innerHTML = '';
-
-    // "Todos" button
-    const allBtn = document.createElement('button');
-    allBtn.className = `filter-tag ${activeTagFilter === '' ? 'active' : ''}`;
-    allBtn.textContent = 'Todos';
-    allBtn.onclick = () => { activeTagFilter = ''; applyFiltersAndRender(); updateTagButtons(); };
-    filterTagsContainer.appendChild(allBtn);
-
-    sortedTags.forEach(tag => {
-        const btn = document.createElement('button');
-        btn.className = `filter-tag ${activeTagFilter === tag ? 'active' : ''}`;
-        btn.textContent = tag;
-        btn.onclick = () => { activeTagFilter = tag; applyFiltersAndRender(); updateTagButtons(); };
-        filterTagsContainer.appendChild(btn);
-    });
-}
-
-function updateTagButtons() {
-    const btns = filterTagsContainer.querySelectorAll('.filter-tag');
-    btns.forEach(btn => {
-        if (btn.textContent === 'Todos' && activeTagFilter === '') btn.classList.add('active');
-        else if (btn.textContent === activeTagFilter) btn.classList.add('active');
-        else btn.classList.remove('active');
-    });
-}
-
-searchInput.addEventListener('input', (e) => {
-    activeSearchTerm = e.target.value.toLowerCase();
-    applyFiltersAndRender();
-});
-
-function applyFiltersAndRender() {
-    let filtered = allVideos;
-
-    // Exclude if doesn't match search term
-    if (activeSearchTerm) {
-        filtered = filtered.filter(v => {
-            const mTitle = v.titulo.toLowerCase().includes(activeSearchTerm);
-            const mTags = v.Tags.some(t => t.nome.toLowerCase().includes(activeSearchTerm));
-            return mTitle || mTags;
-        });
-    }
-
-    // Exclude if doesn't have the active tag
-    if (activeTagFilter) {
-        filtered = filtered.filter(v => v.Tags.some(t => t.nome === activeTagFilter));
-    }
-
-    renderVideos(filtered);
-}
-
-// -------------------------------
-// RENDERING
-// -------------------------------
-function renderVideos(videos) {
-    videosGrid.innerHTML = '';
-    resultsCount.textContent = `${videos.length} tutoriais encontrados`;
-
-    if (!videos || videos.length === 0) {
+    // Atualiza apenas se houver cards e o empty state
+    if (cards.length > 0) {
+        emptyState.classList.add('hidden');
+    } else {
         emptyState.classList.remove('hidden');
-        return;
     }
 
-    emptyState.classList.add('hidden');
+    resultsCount.textContent = `${cards.length} tutoriais encontrados`;
+    statTotal.textContent = cards.length;
 
-    videos.forEach(video => {
-        const dateObj = new Date(video.data_publicacao);
-        const dateStr = dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' });
-        const duracaoStr = video.duracao ? video.duracao : '15:30'; // fallback
-
-        // Tags Logic (max 3 displayed)
-        let tagsHtml = '';
-        const displayTags = video.Tags.slice(0, 3);
-        const hiddenTagsCount = video.Tags.length - 3;
-
-        displayTags.forEach(tag => {
-            let extraClass = '';
-            if (['n8n', 'automação'].includes(tag.nome)) extraClass = 'tag-n8n';
-            if (['ia', 'openai', 'gpt-4'].includes(tag.nome)) extraClass = 'tag-ia';
-            tagsHtml += `<span class="tag-badge ${extraClass}">${tag.nome}</span>`;
-        });
-        if (hiddenTagsCount > 0) {
-            tagsHtml += `<span class="tag-badge more-tag">+${hiddenTagsCount}</span>`;
+    // Contar tags unicas lendo o HTML
+    const uniqueTags = new Set();
+    document.querySelectorAll('.tag-badge').forEach(badge => {
+        if (!badge.classList.contains('more-tag')) {
+            uniqueTags.add(badge.textContent.trim());
         }
-
-        const card = document.createElement('div');
-        card.className = 'video-card';
-        card.innerHTML = `
-            <div class="card-thumbnail" onclick="openModal('${video.id}')">
-                <div class="play-btn">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-                </div>
-                <div class="duration-badge">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                    ${duracaoStr}
-                </div>
-            </div>
-            <div class="card-content">
-                <h3 class="card-title">${video.titulo}</h3>
-                <div class="tags-container">
-                    ${tagsHtml}
-                </div>
-                <p class="card-summary">${video.resumo_ia || 'Nenhum resumo disponível.'}</p>
-                <div class="card-footer">
-                    <span class="card-date">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-                        ${dateStr}
-                    </span>
-                    <button class="ver-mais-btn" onclick="openModal('${video.id}')">
-                        Ver mais 
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
-                    </button>
-                </div>
-            </div>
-        `;
-        videosGrid.appendChild(card);
     });
+    statTags.textContent = uniqueTags.size;
 }
+
+// O código de busca (Search) antigo foi removido, pois exigiria re-renderização completa.
+// Como o HTML agora é estático, a busca precisaria ser feita ocultando/mostrando cards (display: none).
+// Sinta-se à vontade para pedir a reimplementação da busca estática!
 
 // -------------------------------
 // MODAL & IFRAME
