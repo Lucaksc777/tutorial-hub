@@ -2,6 +2,7 @@ const { Video, Tag } = require('../models');
 
 const fs = require('fs');
 const path = require('path');
+const simpleGit = require('simple-git');
 
 // O n8n vai bater nessa rota com title, resumo_ia, link_iframe, duracao, e um array de nomes de tags.
 exports.webhookN8n = async (req, res) => {
@@ -72,12 +73,53 @@ exports.webhookN8n = async (req, res) => {
             indexHtml = indexHtml.replace(marker, cardHtml + '\n                ' + marker);
             fs.writeFileSync(indexPath, indexHtml, 'utf8');
             console.log('✅ Novo card injetado no index.html!');
+
+            // -------------------------------------------------------------
+            // Auto-Commit para o GitHub (Para ambientes efêmeros como Render)
+            // -------------------------------------------------------------
+            const githubToken = process.env.GITHUB_TOKEN;
+            const githubUser = process.env.GITHUB_USER;
+            const githubRepo = process.env.GITHUB_REPO; // ex: Lucaksc777/tutorial-hub
+
+            if (githubToken && githubUser && githubRepo) {
+                console.log('🔒 GITHUB_TOKEN detectado. Iniciando Auto-Commit...');
+                try {
+                    const git = simpleGit(path.join(__dirname, '..'));
+
+                    // Configurar o repositório remoto com o token para autenticação
+                    const remoteUrl = `https://${githubUser}:${githubToken}@github.com/${githubRepo}.git`;
+
+                    // Remove o origin antigo se existir, ou apenas seta o novo URL
+                    await git.listRemote(['--get-url', 'origin']).then(async (url) => {
+                        if (url) {
+                            await git.remote(['set-url', 'origin', remoteUrl]);
+                        } else {
+                            await git.addRemote('origin', remoteUrl);
+                        }
+                    }).catch(async () => {
+                        await git.addRemote('origin', remoteUrl);
+                    });
+
+                    // Commit e Push apenas do index.html
+                    await git.add('./public/index.html');
+                    await git.commit(`Automated HTML Injection: Video - ${titulo}`);
+                    await git.push('origin', 'main');
+
+                    console.log('✅ Alterações enviadas com sucesso para o GitHub!');
+                } catch (gitErr) {
+                    console.error('❌ Erro durante o Auto-Commit no GitHub:', gitErr.message);
+                    fs.appendFileSync('server_errors.log', `${new Date().toISOString()} - Git Push Error: ${gitErr.message}\n`);
+                }
+            } else {
+                console.log('⚠️ Aviso: GITHUB_TOKEN ou credenciais não encontradas. O arquivo foi alterado apenas localmente.');
+            }
+
         } else {
             console.error('Marcador <!-- NOVOS_CARDS_AQUI --> não encontrado no index.html.');
             return res.status(500).json({ error: 'Marcador não encontrado no HTML.' });
         }
 
-        res.status(200).json({ msg: 'HTML gerado e injetado com sucesso no arquivo estático!' });
+        res.status(200).json({ msg: 'HTML gerado e processa com sucesso!' });
     } catch (err) {
         fs.appendFileSync('server_errors.log', `${new Date().toISOString()} - Webhook HTML Error: ${err.message}\n`);
         console.error('Erro no Webhook HTML:', err);
